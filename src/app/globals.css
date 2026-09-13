@@ -24,3 +24,21 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Agrega esto al final de tu src/app/globals.css */
+.pitch-black-logo {
+  background: linear-gradient(180deg, #f0efec 0%, #898781 50%, transparent 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0px 4px 15px rgba(0, 0, 0, 0.8);
+  font-family: ui-serif, Georgia, serif; /* O puedes importar la fuente exacta luego */
+  letter-spacing: -0.05em;
+  transform: scaleY(1.1);
+}
+
+.pitch-black-greeting {
+  background: linear-gradient(180deg, #f0efec 20%, #898781 80%, rgba(20,20,20,0) 110%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.5));
+}
