@@ -8,10 +8,8 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { 
   Plus, FolderClosed, Layers, Code2, SlidersHorizontal, 
-  Mic, ArrowUp, ChevronDown, PenLine, LogOut, Settings
+  Mic, ArrowUp, ChevronDown, PenLine, LogOut, Settings, Copy, Check, Pencil
 } from "lucide-react";
-
-import { useChat } from '@ai-sdk/react'; 
 
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -29,34 +27,26 @@ const personas = [
 export default function Home() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
+  const [inputValue, setInputValue] = useState("");
   const [chatHistory, setChatHistory] = useState<any[]>([]);
+  const [messages, setMessages] = useState<any[]>([]);
   const [activePersona, setActivePersona] = useState(personas[0]);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
+  // Estados para editar un mensaje
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editText, setEditText] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const { messages, input, handleInputChange, handleSubmit, setMessages, isLoading } = useChat({
-    api: '/api/chat', 
-    body: {
-      persona: activePersona.id, 
-    },
-    onFinish: async (message) => {
-      if (user && currentChatId && message?.content) {
-        try {
-          await updateDoc(doc(db, "users", user.uid, "chats", currentChatId), {
-            messages: arrayUnion({ role: "assistant", content: message.content })
-          });
-        } catch (error) { console.error("Error guardando respuesta:", error); }
-      }
-    }
-  });
-
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, isLoading]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
@@ -80,56 +70,129 @@ export default function Home() {
     }
     const unsubscribe = onSnapshot(doc(db, "users", user.uid, "chats", currentChatId), (docSnap) => {
       if (docSnap.exists()) {
-        const firestoreMessages = docSnap.data().messages || [];
-        // Mapeamos de forma segura para evitar que falle con elementos indefinidos
-        const formatted = firestoreMessages.map((m: any) => ({
-          id: Math.random().toString(),
-          role: m.role || 'user',
-          content: m.content || ''
-        }));
-        setMessages(formatted);
+        setMessages(docSnap.data().messages || []);
         const savedPersona = personas.find(p => p.id === docSnap.data().persona);
         if (savedPersona) setActivePersona(savedPersona);
       }
     });
     return () => unsubscribe();
-  }, [user, currentChatId, setMessages]);
+  }, [user, currentChatId]);
 
-  const handleCustomSubmit = async (e: any) => {
-    e.preventDefault();
-    if (!input || !input.trim() || !user) return;
+  // Función robusta para enviar mensajes y consultar la API nativa de streaming
+  const sendMessageToAI = async (messagesToSend: any[], chatId: string) => {
+    setIsLoading(true);
     
+    // Agregamos un marcador temporal de "asistente pensando"
+    const tempMessages = [...messagesToSend, { role: "assistant", content: "" }];
+    setMessages(tempMessages);
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: messagesToSend.map(m => ({ role: m.role, content: m.content })),
+          persona: activePersona.id,
+        }),
+      });
+
+      if (!response.ok) throw new Error("Error en la respuesta de la API");
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let assistantResponse = "";
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          assistantResponse += chunk;
+
+          // Actualizamos la UI en tiempo real (efecto streaming de tecleo)
+          setMessages([...messagesToSend, { role: "assistant", content: assistantResponse }]);
+        }
+      }
+
+      // Guardamos la conversación completa en Firebase
+      const finalMessages = [...messagesToSend, { role: "assistant", content: assistantResponse }];
+      await updateDoc(doc(db, "users", user.uid, "chats", chatId), {
+        messages: finalMessages
+      });
+
+    } catch (error) {
+      console.error("Error hablando con la IA:", error);
+      setMessages([...messagesToSend, { role: "assistant", content: "⚠️ Lo siento, ocurrió un error al procesar tu solicitud con la red." }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!inputValue || !inputValue.trim() || !user || isLoading) return;
+    const textToSend = inputValue;
+    setInputValue("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
 
     let activeChatId = currentChatId;
+    let newMessagesList = [];
 
     if (!activeChatId) {
       try {
         const docRef = await addDoc(collection(db, "users", user.uid, "chats"), {
-          title: input.substring(0, 30) + (input.length > 30 ? "..." : ""),
+          title: textToSend.substring(0, 30) + (textToSend.length > 30 ? "..." : ""),
           persona: activePersona.id,
           createdAt: serverTimestamp(),
-          messages: [{ role: "user", content: input }]
+          messages: [{ role: "user", content: textToSend }]
         });
         activeChatId = docRef.id;
         setCurrentChatId(docRef.id);
-      } catch (error) { console.error("Error:", error); }
+        newMessagesList = [{ role: "user", content: textToSend }];
+      } catch (error) { console.error("Error creando chat:", error); return; }
     } else {
-       try {
+      newMessagesList = [...messages, { role: "user", content: textToSend }];
+      try {
         await updateDoc(doc(db, "users", user.uid, "chats", activeChatId), {
-          messages: arrayUnion({ role: "user", content: input })
+          messages: newMessagesList
         });
-      } catch (error) { console.error("Error:", error); }
+      } catch (error) { console.error("Error actualizando chat:", error); }
     }
 
-    handleSubmit(e);
+    setMessages(newMessagesList);
+    await sendMessageToAI(newMessagesList, activeChatId);
+  };
+
+  // Función para re-enviar un mensaje editado
+  const handleEditSubmit = async (index: number) => {
+    if (!editText.trim() || !user || !currentChatId) return;
+    
+    // Cortamos la historia hasta el mensaje editado
+    const truncatedMessages = messages.slice(0, index);
+    const updatedMessages = [...truncatedMessages, { role: "user", content: editText }];
+    
+    setEditingIndex(null);
+    setEditText("");
+    setMessages(updatedMessages);
+
+    // Actualizamos Firebase y consultamos a la IA con el nuevo hilo corregido
+    await updateDoc(doc(db, "users", user.uid, "chats", currentChatId), {
+      messages: updatedMessages
+    });
+
+    await sendMessageToAI(updatedMessages, currentChatId);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleCustomSubmit(e as any);
+      handleSendMessage();
     }
+  };
+
+  const copyToClipboard = (text: string, index: number) => {
+    navigator.clipboard.writeText(text);
+    setCopiedIndex(index);
+    setTimeout(() => setCopiedIndex(null), 2000);
   };
 
   const handleLogout = async () => {
@@ -139,6 +202,7 @@ export default function Home() {
   return (
     <div className="flex h-screen bg-[#151515] text-[#f0efec] font-sans selection:bg-[#898781]/30">
       
+      {/* BARRA LATERAL */}
       <aside className="w-[288px] flex-shrink-0 bg-[#151515] hidden md:flex flex-col border-r border-[#ffffff0a] relative">
          <div className="p-4 flex flex-col gap-4">
             <div className="flex items-center gap-3 px-2">
@@ -202,6 +266,7 @@ export default function Home() {
          </div>
       </aside>
 
+      {/* ÁREA PRINCIPAL */}
       <main className="flex-1 flex flex-col relative h-full bg-[#151515]">
         
         {currentChatId && (
@@ -229,67 +294,102 @@ export default function Home() {
                </div>
             ) : (
                messages.map((msg, idx) => (
-                 <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`px-5 py-3.5 max-w-[85%] text-[15px] leading-relaxed overflow-hidden ${msg.role === 'user' ? 'bg-[#2a2a29] text-[#f0efec] rounded-2xl rounded-tr-sm' : 'text-[#f0efec]'}`}>
+                 <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                    <div className={`px-5 py-3.5 max-w-[85%] text-[15px] leading-relaxed overflow-hidden relative group ${msg.role === 'user' ? 'bg-[#2a2a29] text-[#f0efec] rounded-2xl rounded-tr-sm' : 'text-[#f0efec]'}`}>
+                       
                        {msg.role !== 'user' && (
-                          <div className="flex items-center gap-2 mb-4">
-                             <activePersona.icon className={`w-4 h-4 ${activePersona.color}`} />
-                             <span className="font-semibold text-sm">{activePersona.name}</span>
+                          <div className="flex items-center justify-between mb-4">
+                             <div className="flex items-center gap-2">
+                                <activePersona.icon className={`w-4 h-4 ${activePersona.color}`} />
+                                <span className="font-semibold text-sm">{activePersona.name}</span>
+                             </div>
+                             <button 
+                                onClick={() => copyToClipboard(msg.content, idx)}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-xs text-[#898781] hover:text-[#f0efec] bg-[#20201f] px-2 py-1 rounded-md border border-[#ffffff1a]"
+                             >
+                                {copiedIndex === idx ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                                {copiedIndex === idx ? "Copiado" : "Copiar respuesta"}
+                             </button>
                           </div>
                        )}
-                       
-                       <div className="prose prose-invert max-w-none">
-                         <ReactMarkdown
-                           remarkPlugins={[remarkGfm]}
-                           components={{
-                             code({node, inline, className, children, ...props}: any) {
-                               const match = /language-(\w+)/.exec(className || '')
-                               return !inline && match ? (
-                                 <div className="rounded-xl overflow-hidden my-4 border border-[#ffffff1a]">
-                                   <div className="flex items-center justify-between px-4 py-1.5 bg-[#1a1a19] text-[#898781] text-xs font-mono border-b border-[#ffffff1a]">
-                                     <span>{match[1]}</span>
-                                     <button className="hover:text-[#f0efec] transition-colors">Copiar</button>
-                                   </div>
-                                   <SyntaxHighlighter
-                                     {...props}
-                                     style={vscDarkPlus}
-                                     language={match[1]}
-                                     PreTag="div"
-                                     customStyle={{ margin: 0, padding: '1rem', background: '#151515', fontSize: '0.85rem' }}
-                                   >
-                                     {String(children || '').replace(/\n$/, '')}
-                                   </SyntaxHighlighter>
-                                 </div>
-                               ) : (
-                                 <code {...props} className="bg-[#2a2a29] text-rose-300 px-1.5 py-0.5 rounded-md text-[0.85em] font-mono">
-                                   {children}
-                                 </code>
-                               )
-                             }
-                           }}
-                         >
-                           {msg.content || ''}
-                         </ReactMarkdown>
-                       </div>
-                       
+
+                       {/* Modo Edición para el usuario */}
+                       {msg.role === 'user' && editingIndex === idx ? (
+                          <div className="flex flex-col gap-2 w-[300px] md:w-[400px]">
+                             <textarea
+                                value={editText}
+                                onChange={(e) => setEditText(e.target.value)}
+                                className="w-full bg-[#151515] text-[#f0efec] p-2 rounded-lg border border-[#ffffff1a] text-sm outline-none resize-none"
+                                rows={3}
+                             />
+                             <div className="flex justify-end gap-2">
+                                <button onClick={() => setEditingIndex(null)} className="px-3 py-1 text-xs text-[#898781] hover:text-[#f0efec]">Cancelar</button>
+                                <button onClick={() => handleEditSubmit(idx)} className="px-3 py-1 text-xs bg-[#f0efec] text-[#151515] rounded-md font-medium">Guardar y Enviar</button>
+                             </div>
+                          </div>
+                       ) : (
+                          <div className="prose prose-invert max-w-none">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={{
+                                code({node, inline, className, children, ...props}: any) {
+                                  const match = /language-(\w+)/.exec(className || '')
+                                  const codeContent = String(children || '').replace(/\n$/, '');
+                                  return !inline && match ? (
+                                    <div className="rounded-xl overflow-hidden my-4 border border-[#ffffff1a]">
+                                      <div className="flex items-center justify-between px-4 py-1.5 bg-[#1a1a19] text-[#898781] text-xs font-mono border-b border-[#ffffff1a]">
+                                        <span>{match[1]}</span>
+                                        <button 
+                                          onClick={() => copyToClipboard(codeContent, idx * 100)} 
+                                          className="hover:text-[#f0efec] transition-colors flex items-center gap-1"
+                                        >
+                                          {copiedIndex === idx * 100 ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                                          {copiedIndex === idx * 100 ? "Copiado" : "Copiar"}
+                                        </button>
+                                      </div>
+                                      <SyntaxHighlighter
+                                        {...props}
+                                        style={vscDarkPlus}
+                                        language={match[1]}
+                                        PreTag="div"
+                                        customStyle={{ margin: 0, padding: '1rem', background: '#151515', fontSize: '0.85rem' }}
+                                      >
+                                        {codeContent}
+                                      </SyntaxHighlighter>
+                                    </div>
+                                  ) : (
+                                    <code {...props} className="bg-[#2a2a29] text-rose-300 px-1.5 py-0.5 rounded-md text-[0.85em] font-mono">
+                                      {children}
+                                    </code>
+                                  )
+                                }
+                              }}
+                            >
+                              {msg.content || ''}
+                            </ReactMarkdown>
+                          </div>
+                       )}
+
                     </div>
+
+                    {/* Botón de editar debajo del mensaje del usuario */}
+                    {msg.role === 'user' && editingIndex !== idx && (
+                       <button 
+                          onClick={() => { setEditingIndex(idx); setEditText(msg.content); }}
+                          className="text-[11px] text-[#52514e] hover:text-[#898781] mt-1 mr-2 flex items-center gap-1 transition-colors"
+                       >
+                          <Pencil className="w-3 h-3" /> Editar
+                       </button>
+                    )}
                  </div>
                ))
-            )}
-            
-            {isLoading && (
-              <div className="flex justify-start">
-                 <div className="flex items-center gap-2 text-[#898781] px-5 py-3">
-                   <activePersona.icon className={`w-4 h-4 ${activePersona.color} animate-pulse`} />
-                   <span className="text-sm italic">Pensando...</span>
-                 </div>
-              </div>
             )}
             
             <div ref={messagesEndRef} />
           </div>
         </div>
 
+        {/* CAJA DE TEXTO */}
         <div className="w-full max-w-[52rem] mx-auto px-4 pb-6 relative shrink-0">
            
            {isDropdownOpen && !currentChatId && (
@@ -305,13 +405,17 @@ export default function Home() {
               </div>
            )}
 
-           <form onSubmit={handleCustomSubmit} className="w-full bg-[#20201f] border border-[#ffffff0a] rounded-2xl shadow-lg flex flex-col relative focus-within:ring-1 focus-within:ring-[#ffffff1a] transition-all">
+           <div className="w-full bg-[#20201f] border border-[#ffffff0a] rounded-2xl shadow-lg flex flex-col relative focus-within:ring-1 focus-within:ring-[#ffffff1a] transition-all">
               <div className="flex items-end px-3 py-3 gap-2">
                  <button type="button" className="p-2 text-[#898781] hover:text-[#f0efec] transition-colors"><Plus className="w-[20px] h-[20px]" /></button>
                  <textarea 
                     ref={textareaRef}
-                    value={input || ''}
-                    onChange={(e) => { handleInputChange(e); e.target.style.height = 'auto'; e.target.style.height = `${e.target.scrollHeight}px`; }}
+                    value={inputValue}
+                    onChange={(e) => {
+                      setInputValue(e.target.value);
+                      e.target.style.height = 'auto';
+                      e.target.style.height = `${e.target.scrollHeight}px`;
+                    }}
                     onKeyDown={handleKeyDown}
                     className="w-full bg-transparent resize-none text-[15px] outline-none placeholder-[#898781] text-[#f0efec] py-2 max-h-48 min-h-[40px]"
                     placeholder={`Escribe un mensaje para ${activePersona.name}...`}
@@ -320,12 +424,17 @@ export default function Home() {
                  
                  <div className="flex items-center gap-1 pb-0.5">
                     <button type="button" className="p-2 text-[#898781] hover:text-[#f0efec] transition-colors"><Mic className="w-[18px] h-[18px]" /></button>
-                    <button type="submit" disabled={!input || !input.trim() || isLoading} className={`p-2 rounded-xl transition-colors ${input && input.trim() && !isLoading ? 'bg-[#f0efec] text-[#151515] hover:bg-[#e1e0d9]' : 'text-[#52514e] cursor-not-allowed'}`}>
+                    <button 
+                      type="button" 
+                      onClick={handleSendMessage}
+                      disabled={!inputValue.trim() || isLoading} 
+                      className={`p-2 rounded-xl transition-colors ${inputValue.trim() && !isLoading ? 'bg-[#f0efec] text-[#151515] hover:bg-[#e1e0d9]' : 'text-[#52514e] cursor-not-allowed'}`}
+                    >
                        <ArrowUp className="w-[18px] h-[18px]" />
                     </button>
                  </div>
               </div>
-           </form>
+           </div>
            
            <div className="flex justify-between items-center mt-3 px-2 text-[11px] text-[#52514e]">
               <p>Pitch Black es una IA y puede cometer errores. Comprueba las respuestas.</p>
