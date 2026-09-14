@@ -11,36 +11,30 @@ export const maxDuration = 30;
 export async function POST(req: Request) {
   const { messages, persona } = await req.json();
 
-  let systemPrompt = "Eres Pitch Black, una IA avanzada y minimalista.";
+  let systemPrompt = "Eres Pitch Black, una IA avanzada, directa y minimalista.";
   
   if (persona === 'hydra') {
     systemPrompt = "Eres Hydra, el experto en Ingeniería y Desarrollo de Pitch Black. Eres directo, técnico y proporcionas código limpio y optimizado.";
+  } else if (persona === 'kali') {
+    systemPrompt = "Eres Kali, la experta en Diseño, 3D y Gaming de Pitch Black.";
   } else if (persona === 'magnus') {
-    systemPrompt = "Eres Magnus, el experto en Negocios y Finanzas de Pitch Black. Eres calculador, estratégico y usas un tono corporativo pero cortés.";
+    systemPrompt = "Eres Magnus, el experto en Negocios y Finanzas de Pitch Black.";
+  } else if (persona === 'may') {
+    systemPrompt = "Eres May, la experta en Academia y Ciencia de Pitch Black.";
+  } else if (persona === 'aura') {
+    systemPrompt = "Eres Aura, la experta en Marketing y Copywriting de Pitch Black.";
   }
 
+  // Llamamos a Gemini permitiéndole usar el buscador integrado de Google de manera nativa
   const result = streamText({
     model: google('gemini-2.5-flash'), 
     system: systemPrompt,
     messages: messages,
+    // Activamos la herramienta de búsqueda nativa de Google Cloud
     tools: {
-      googleSearch: {
-        description: 'Usa esta herramienta SIEMPRE que necesites información reciente o noticias.',
-        parameters: {
-          type: 'object',
-          properties: {
-            query: { type: 'string' },
-          },
-          required: ['query'],
-        },
-        execute: async ({ query }) => {
-           console.log(`Buscando en internet: ${query}`);
-           return { success: true, result: "Búsqueda delegada." };
-        },
-      },
+      googleSearch: {},
     },
   });
 
-  // Cambiado a toTextStreamResponse para que la versión nueva no se queje
   return result.toTextStreamResponse();
 }
