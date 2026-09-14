@@ -1,23 +1,18 @@
 "use client";
 
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { auth, googleProvider } from "../../firebase"; 
 import { signInWithPopup } from "firebase/auth";
 
 export default function Login() {
-  const router = useRouter(); // El teletransportador de Next.js
+  const router = useRouter(); 
   
-  // Función de Login + Redirección
   const handleGoogleSignIn = async () => {
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
       console.log("¡Logueado con éxito!", user.displayName);
-      
-      // Si salió bien, mandamos al usuario a la página principal del chat
       router.push("/");
-      
     } catch (error) {
       console.error("Error al iniciar sesión:", error);
     }
@@ -87,17 +82,41 @@ export default function Login() {
           </div>
         </div>
 
+        {/* CONTENEDOR DERECHO: ARTE GEOMÉTRICO (REEMPLAZA AL MUÑECO) */}
         <div className="w-full lg:w-[45%] flex justify-center lg:justify-end mt-16 lg:mt-0">
-           <div className="relative w-full max-w-[460px] aspect-[4/5] rounded-[32px] overflow-hidden shadow-2xl ring-1 ring-white/5 bg-[#1a1a19]">
-              {/* RUTA DIRECTA AL ARCHIVO EN PUBLIC */}
-              <Image 
-                src="/hero.jpg" 
-                alt="Pitch Black IA" 
-                fill 
-                className="object-cover"
-                priority
-                unoptimized
-              />
+           <div className="relative w-full max-w-[460px] aspect-[4/5] rounded-[32px] overflow-hidden shadow-2xl ring-1 ring-white/5 bg-[#1a1a19] flex items-center justify-center p-8">
+              
+              {/* Reflejo superior sutil */}
+              <div className="absolute top-0 left-0 w-full h-1/2 bg-gradient-to-b from-[#ffffff05] to-transparent pointer-events-none"></div>
+              
+              {/* Arte SVG Puro - "El Núcleo de Pitch Black" */}
+              <svg viewBox="0 0 200 200" className="w-[70%] h-[70%] drop-shadow-2xl" xmlns="http://www.w3.org/2000/svg">
+                 <defs>
+                    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+                       <stop offset="0%" stopColor="#ffffff" stopOpacity="0.06" />
+                       <stop offset="100%" stopColor="#151515" stopOpacity="0" />
+                    </radialGradient>
+                 </defs>
+                 
+                 {/* Halo de luz central */}
+                 <circle cx="100" cy="100" r="100" fill="url(#glow)" />
+                 
+                 {/* Anillos orbitales tecnológicos (Giran) */}
+                 <circle cx="100" cy="100" r="75" fill="none" stroke="#898781" strokeWidth="0.5" strokeDasharray="4 6" opacity="0.3" className="animate-[spin_40s_linear_infinite]" />
+                 <circle cx="100" cy="100" r="90" fill="none" stroke="#898781" strokeWidth="0.2" opacity="0.2" className="animate-[spin_60s_linear_infinite_reverse]" />
+                 
+                 {/* Estrella central masiva (Misma proporción que tu logo, pero grande) */}
+                 <path 
+                   d="M100 0 L107 71 L171 29 L129 93 L200 100 L129 107 L171 171 L107 129 L100 200 L93 129 L29 171 L71 107 L0 100 L71 93 L29 29 L93 71 Z" 
+                   fill="#898781" 
+                   opacity="0.9"
+                   className="animate-[pulse_4s_ease-in-out_infinite]"
+                 />
+                 
+                 {/* Agujero negro central con núcleo */}
+                 <circle cx="100" cy="100" r="14" fill="#151515" />
+                 <circle cx="100" cy="100" r="4" fill="#f0efec" className="animate-pulse" />
+              </svg>
            </div>
         </div>
       </main>
