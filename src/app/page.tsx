@@ -7,7 +7,7 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { 
   Plus, FolderClosed, Layers, Code2, SlidersHorizontal, 
-  Mic, ArrowUp, ChevronDown, PenLine, LogOut, Settings, Palette
+  Mic, ArrowUp, ChevronDown, PenLine, LogOut, Settings
 } from "lucide-react";
 
 const personas = [
@@ -26,6 +26,9 @@ export default function Home() {
   const [activePersona, setActivePersona] = useState(personas[0]);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  
+  // Nuevo estado para saber en qué chat estamos
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -53,12 +56,14 @@ export default function Home() {
     const messageText = inputValue;
     setInputValue("");
     try {
-      await addDoc(collection(db, "users", user.uid, "chats"), {
+      // Guardamos el chat y capturamos el ID para seleccionarlo automáticamente
+      const docRef = await addDoc(collection(db, "users", user.uid, "chats"), {
         title: messageText.substring(0, 30) + (messageText.length > 30 ? "..." : ""),
         persona: activePersona.id,
         createdAt: serverTimestamp(),
         messages: [{ role: "user", content: messageText }]
       });
+      setCurrentChatId(docRef.id);
     } catch (error) {
       console.error("Error al guardar el chat:", error);
     }
@@ -80,6 +85,12 @@ export default function Home() {
     }
   };
 
+  // Función para el botón "Nuevo Chat"
+  const handleNewChat = () => {
+    setCurrentChatId(null);
+    setInputValue("");
+  };
+
   return (
     <div className="flex h-screen bg-[#151515] text-[#f0efec] font-sans selection:bg-[#898781]/30">
       
@@ -91,23 +102,23 @@ export default function Home() {
                 </svg>
                 <span className="font-serif font-bold text-xl tracking-tight">Pitch Black</span>
             </div>
-            <button className="flex items-center gap-2 bg-[#20201f] hover:bg-[#2a2a29] text-[#f0efec] px-4 py-2.5 rounded-lg border border-[#ffffff1a] transition-colors text-sm font-medium shadow-md">
+            
+            {/* Botón Nuevo Chat Sincronizado */}
+            <button 
+              onClick={handleNewChat}
+              className="flex items-center gap-2 bg-[#20201f] hover:bg-[#2a2a29] text-[#f0efec] px-4 py-2.5 rounded-lg border border-[#ffffff1a] transition-colors text-sm font-medium shadow-md"
+            >
                <Plus className="w-4 h-4" /> Nuevo Chat
             </button>
          </div>
 
+         {/* Menú Superior Ultra Limpio */}
          <nav className="flex flex-col px-4 space-y-1 mb-6">
             <button className="flex items-center gap-3 w-full text-left px-3 py-2 text-[#898781] hover:bg-[#20201f] hover:text-[#f0efec] text-[14px] rounded-lg transition-colors">
               <FolderClosed className="w-[18px] h-[18px]" /> Proyectos
             </button>
             <button className="flex items-center gap-3 w-full text-left px-3 py-2 text-[#898781] hover:bg-[#20201f] hover:text-[#f0efec] text-[14px] rounded-lg transition-colors">
               <Layers className="w-[18px] h-[18px]" /> Artefactos
-            </button>
-            <button className="flex items-center justify-between w-full px-3 py-2 text-[#f0efec] bg-[#20201f] text-[14px] rounded-lg transition-colors border border-[#ffffff1a]">
-              <div className="flex items-center gap-3">
-                 <Code2 className="w-[18px] h-[18px] text-[#898781]" /> Código
-              </div>
-              <span className="text-[11px] text-[#898781]">Actualizar</span>
             </button>
          </nav>
          
@@ -124,25 +135,24 @@ export default function Home() {
             ) : (
                <div className="space-y-1">
                  {chatHistory.map((chat) => (
-                   <p key={chat.id} className="text-[13px] text-[#898781] hover:bg-[#20201f] hover:text-[#f0efec] px-3 py-2 rounded-lg cursor-pointer truncate transition-colors flex items-center gap-2">
+                   <button 
+                     key={chat.id} 
+                     onClick={() => setCurrentChatId(chat.id)}
+                     className={`w-full text-left text-[13px] px-3 py-2 rounded-lg cursor-pointer truncate transition-colors flex items-center gap-2 
+                       ${currentChatId === chat.id ? 'bg-[#2a2a29] text-[#f0efec]' : 'text-[#898781] hover:bg-[#20201f] hover:text-[#f0efec]'}`}
+                   >
                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${personas.find(p => p.id === chat.persona)?.color.replace('text-', 'bg-') || 'bg-[#898781]'}`}></span>
                      {chat.title}
-                   </p>
+                   </button>
                  ))}
                </div>
             )}
          </div>
 
-         {/* Menú de Usuario Minimalista (Estilo Claude) */}
+         {/* Menú de Usuario Minimalista */}
          <div className="absolute bottom-0 left-0 w-full p-2 bg-[#151515] border-t border-[#ffffff0a]">
-            
-            {/* Opción de Diseño extra justo arriba del perfil */}
-            <button className="flex items-center gap-3 w-full text-left px-4 py-2.5 text-[#898781] hover:text-[#f0efec] text-[14px] transition-colors mb-2">
-              <Palette className="w-[18px] h-[18px]" /> Diseño
-            </button>
-
             {isUserMenuOpen && (
-               <div className="absolute bottom-[4rem] left-2 w-[256px] bg-[#20201f] border border-[#ffffff1a] rounded-xl shadow-2xl p-1 z-50">
+               <div className="absolute bottom-[3.5rem] left-2 w-[256px] bg-[#20201f] border border-[#ffffff1a] rounded-xl shadow-2xl p-1 z-50">
                   <div className="px-3 py-2 mb-1 border-b border-[#ffffff0a]">
                     <p className="text-[13px] text-[#898781] truncate">{user?.email || "usuario@correo.com"}</p>
                   </div>
