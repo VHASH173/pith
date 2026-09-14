@@ -3,12 +3,12 @@
 
 import { useState, useEffect, useRef } from "react";
 import { auth, db } from "../firebase"; 
-import { collection, addDoc, serverTimestamp, query, orderBy, onSnapshot, doc, updateDoc, arrayUnion } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, arrayUnion } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { 
   Plus, FolderClosed, Layers, Code2, SlidersHorizontal, 
-  Mic, ArrowUp, ChevronDown, PenLine, LogOut, Settings, Copy, Check, Pencil, RotateCw
+  Mic, ArrowUp, ChevronDown, PenLine, LogOut, Settings, Copy, Check, Pencil, RotateCw, Pin, Trash2, MessageSquare, X
 } from "lucide-react";
 
 import ReactMarkdown from 'react-markdown';
@@ -40,6 +40,9 @@ export default function Home() {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
 
+  // Estado para la ventana flotante de "Todos los Chats"
+  const [isAllChatsModalOpen, setIsAllChatsModalOpen] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -52,6 +55,7 @@ export default function Home() {
     return () => unsubscribe();
   }, []);
 
+  // Sincronización en tiempo real con Firebase Firestore
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, "users", user.uid, "chats"), orderBy("createdAt", "desc"));
@@ -108,7 +112,6 @@ export default function Home() {
         }
       }
 
-      // Si por alguna razón la IA regresó vacío, ponemos un texto de respaldo para que no se quede en blanco
       if (!assistantResponse.trim()) {
         assistantResponse = "¡Hola! Estoy aquí listo para ayudarte con lo que necesites.";
         setMessages([...messagesToSend, { role: "assistant", content: assistantResponse }]);
@@ -141,6 +144,7 @@ export default function Home() {
         const docRef = await addDoc(collection(db, "users", user.uid, "chats"), {
           title: textToSend.substring(0, 30) + (textToSend.length > 30 ? "..." : ""),
           persona: activePersona.id,
+          pinned: false,
           createdAt: serverTimestamp(),
           messages: [{ role: "user", content: textToSend }]
         });
@@ -178,13 +182,41 @@ export default function Home() {
     await sendMessageToAI(updatedMessages, currentChatId);
   };
 
-  // Función para regenerar la última respuesta de la IA
   const handleRegenerate = async () => {
     if (messages.length < 2 || isLoading || !currentChatId || !user) return;
-    // Quitamos el último mensaje del asistente y volvemos a enviar la historia previa
     const previousMessages = messages.slice(0, messages.length - 1);
     setMessages(previousMessages);
     await sendMessageToAI(previousMessages, currentChatId);
+  };
+
+  // Función para Fijar / Desfijar Chat en Firestore
+  const togglePinChat = async (e: React.MouseEvent, chatId: string, currentPinnedState: boolean) => {
+    e.stopPropagation();
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, "users", user.uid, "chats", chatId), {
+        pinned: !currentPinnedState
+      });
+    } catch (error) {
+      console.error("Error al fijar chat:", error);
+    }
+  };
+
+  // Función para Eliminar Chat de Firestore
+  const handleDeleteChat = async (e: React.MouseEvent, chatId: string) => {
+    e.stopPropagation();
+    if (!user) return;
+    if (confirm("¿Estás seguro de eliminar este chat permanentemente?")) {
+      try {
+        await deleteDoc(doc(db, "users", user.uid, "chats", chatId));
+        if (currentChatId === chatId) {
+          setCurrentChatId(null);
+          setMessages([]);
+        }
+      } catch (error) {
+        console.error("Error al eliminar chat:", error);
+      }
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -204,6 +236,10 @@ export default function Home() {
     try { await signOut(auth); router.push("/login"); } catch (error) { console.error(error); }
   };
 
+  // Separamos los chats fijados de los normales
+  const pinnedChats = chatHistory.filter(c => c.pinned);
+  const unpinnedChats = chatHistory.filter(c => !c.pinned);
+
   return (
     <div className="flex h-screen bg-[#151515] text-[#f0efec] font-sans selection:bg-[#898781]/30">
       
@@ -221,7 +257,7 @@ export default function Home() {
             </button>
          </div>
 
-         <nav className="flex flex-col px-4 space-y-1 mb-6">
+         <nav className="flex flex-col px-4 space-y-1 mb-2">
             <button className="flex items-center gap-3 w-full text-left px-3 py-2 text-[#898781] hover:bg-[#20201f] hover:text-[#f0efec] text-[14px] rounded-lg transition-colors">
               <FolderClosed className="w-[18px] h-[18px]" /> Proyectos
             </button>
@@ -233,18 +269,62 @@ export default function Home() {
          <div className="flex-1 overflow-y-auto px-4 pb-20">
             <div className="flex justify-between items-center px-3 mb-2">
                <span className="text-xs text-[#52514e] font-medium tracking-wide">TUS CHATS</span>
-               <SlidersHorizontal className="w-3 h-3 text-[#52514e] cursor-pointer hover:text-[#f0efec] transition-colors" />
+               <div className="flex items-center gap-2">
+                 {/* Botón para abrir la ventana completa de todos los chats */}
+                 <button onClick={() => setIsAllChatsModalOpen(true)} title="Ver todos los chats" className="text-[#52514e] hover:text-[#f0efec] transition-colors">
+                   <MessageSquare className="w-3.5 h-3.5" />
+                 </button>
+                 <SlidersHorizontal className="w-3 h-3 text-[#52514e] cursor-pointer hover:text-[#f0efec] transition-colors" />
+               </div>
             </div>
+
             {chatHistory.length === 0 ? (
                <div className="flex flex-col items-center justify-center h-24 text-center mt-4"><p className="text-[13px] text-[#52514e]">Aún no hay chats.</p></div>
             ) : (
-               <div className="space-y-1">
-                 {chatHistory.map((chat) => (
-                   <button key={chat.id} onClick={() => setCurrentChatId(chat.id)} className={`w-full text-left text-[13px] px-3 py-2 rounded-lg cursor-pointer truncate transition-colors flex items-center gap-2 ${currentChatId === chat.id ? 'bg-[#2a2a29] text-[#f0efec]' : 'text-[#898781] hover:bg-[#20201f] hover:text-[#f0efec]'}`}>
-                     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${personas.find(p => p.id === chat.persona)?.color.replace('text-', 'bg-') || 'bg-[#898781]'}`}></span>
-                     {chat.title}
-                   </button>
-                 ))}
+               <div className="space-y-3">
+                 {/* Sección de Chats Fijados */}
+                 {pinnedChats.length > 0 && (
+                   <div className="space-y-1">
+                     <span className="text-[11px] text-[#52514e] px-3 font-semibold uppercase tracking-wider">Fijados</span>
+                     {pinnedChats.map((chat) => (
+                       <div key={chat.id} onClick={() => setCurrentChatId(chat.id)} className={`group relative w-full text-left text-[13px] px-3 py-2 rounded-lg cursor-pointer truncate transition-colors flex items-center justify-between ${currentChatId === chat.id ? 'bg-[#2a2a29] text-[#f0efec]' : 'text-[#898781] hover:bg-[#20201f] hover:text-[#f0efec]'}`}>
+                         <div className="flex items-center gap-2 truncate">
+                           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${personas.find(p => p.id === chat.persona)?.color.replace('text-', 'bg-') || 'bg-[#898781]'}`}></span>
+                           <span className="truncate">{chat.title}</span>
+                         </div>
+                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                           <button onClick={(e) => togglePinChat(e, chat.id, chat.pinned)} title="Desfijar" className="text-amber-400 hover:text-amber-300 p-1">
+                             <Pin className="w-3 h-3 fill-amber-400" />
+                           </button>
+                           <button onClick={(e) => handleDeleteChat(e, chat.id)} title="Eliminar" className="text-rose-400 hover:text-rose-300 p-1">
+                             <Trash2 className="w-3 h-3" />
+                           </button>
+                         </div>
+                       </div>
+                     ))}
+                   </div>
+                 )}
+
+                 {/* Sección de Chats Recientes */}
+                 <div className="space-y-1">
+                   {pinnedChats.length > 0 && <span className="text-[11px] text-[#52514e] px-3 font-semibold uppercase tracking-wider">Recientes</span>}
+                   {unpinnedChats.map((chat) => (
+                     <div key={chat.id} onClick={() => setCurrentChatId(chat.id)} className={`group relative w-full text-left text-[13px] px-3 py-2 rounded-lg cursor-pointer truncate transition-colors flex items-center justify-between ${currentChatId === chat.id ? 'bg-[#2a2a29] text-[#f0efec]' : 'text-[#898781] hover:bg-[#20201f] hover:text-[#f0efec]'}`}>
+                       <div className="flex items-center gap-2 truncate">
+                         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${personas.find(p => p.id === chat.persona)?.color.replace('text-', 'bg-') || 'bg-[#898781]'}`}></span>
+                         <span className="truncate">{chat.title}</span>
+                       </div>
+                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                         <button onClick={(e) => togglePinChat(e, chat.id, chat.pinned)} title="Fijar chat" className="text-[#898781] hover:text-[#f0efec] p-1">
+                           <Pin className="w-3 h-3" />
+                         </button>
+                         <button onClick={(e) => handleDeleteChat(e, chat.id)} title="Eliminar chat" className="text-rose-400 hover:text-rose-300 p-1">
+                           <Trash2 className="w-3 h-3" />
+                         </button>
+                       </div>
+                     </div>
+                   ))}
+                 </div>
                </div>
             )}
          </div>
@@ -270,6 +350,72 @@ export default function Home() {
             </button>
          </div>
       </aside>
+
+      {/* VENTANA MODAL: TODOS LOS CHATS SINCRONIZADOS */}
+      {isAllChatsModalOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#1a1a19] border border-[#ffffff1a] rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl overflow-hidden">
+             
+             {/* Cabecera del Modal */}
+             <div className="flex items-center justify-between px-6 py-4 border-b border-[#ffffff0a]">
+                <div className="flex items-center gap-3">
+                   <MessageSquare className="w-5 h-5 text-[#898781]" />
+                   <h3 className="text-lg font-serif font-medium text-[#f0efec]">Historial Completo de Chats</h3>
+                </div>
+                <button onClick={() => setIsAllChatsModalOpen(false)} className="text-[#898781] hover:text-[#f0efec] p-1 rounded-lg transition-colors">
+                   <X className="w-5 h-5" />
+                </button>
+             </div>
+
+             {/* Lista de Chats en el Modal */}
+             <div className="flex-1 overflow-y-auto p-6 space-y-2">
+                {chatHistory.length === 0 ? (
+                   <p className="text-center text-[#52514e] py-8">No hay chats guardados en Firebase.</p>
+                ) : (
+                   chatHistory.map((chat) => (
+                      <div 
+                        key={chat.id} 
+                        onClick={() => { setCurrentChatId(chat.id); setIsAllChatsModalOpen(false); }}
+                        className="flex items-center justify-between bg-[#20201f] hover:bg-[#2a2a29] border border-[#ffffff0a] px-4 py-3 rounded-xl cursor-pointer transition-colors group"
+                      >
+                         <div className="flex items-center gap-3 truncate">
+                            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${personas.find(p => p.id === chat.persona)?.color.replace('text-', 'bg-') || 'bg-[#898781]'}`}></span>
+                            <div>
+                               <p className="text-sm font-medium text-[#f0efec] truncate">{chat.title}</p>
+                               <span className="text-[11px] text-[#52514e] uppercase">{chat.persona || 'hydra'}</span>
+                            </div>
+                         </div>
+                         <div className="flex items-center gap-2">
+                            <button 
+                              onClick={(e) => togglePinChat(e, chat.id, chat.pinned)} 
+                              title={chat.pinned ? "Desfijar" : "Fijar"} 
+                              className={`p-2 rounded-lg transition-colors ${chat.pinned ? 'text-amber-400 bg-amber-400/10' : 'text-[#898781] hover:text-[#f0efec] hover:bg-[#ffffff0a]'}`}
+                            >
+                               <Pin className={`w-4 h-4 ${chat.pinned ? 'fill-amber-400' : ''}`} />
+                            </button>
+                            <button 
+                              onClick={(e) => handleDeleteChat(e, chat.id)} 
+                              title="Eliminar chat" 
+                              className="p-2 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors"
+                            >
+                               <Trash2 className="w-4 h-4" />
+                            </button>
+                         </div>
+                      </div>
+                   ))
+                )}
+             </div>
+
+             {/* Pie del Modal */}
+             <div className="px-6 py-3 bg-[#151515] border-t border-[#ffffff0a] flex justify-end">
+                <button onClick={() => setIsAllChatsModalOpen(false)} className="bg-[#20201f] hover:bg-[#2a2a29] text-[#f0efec] px-4 py-2 rounded-lg text-sm transition-colors border border-[#ffffff1a]">
+                   Cerrar
+                </button>
+             </div>
+
+          </div>
+        </div>
+      )}
 
       {/* ÁREA PRINCIPAL */}
       <main className="flex-1 flex flex-col relative h-full bg-[#151515]">
@@ -301,10 +447,8 @@ export default function Home() {
                messages.map((msg, idx) => (
                  <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                     
-                    {/* BARRA DE ACCESOS DIRECTOS INFERIOR (ESTILO REFERENCIA FOTO 1) */}
                     <div className={`px-5 py-3.5 max-w-[85%] text-[15px] leading-relaxed overflow-hidden relative group ${msg.role === 'user' ? 'bg-[#2a2a29] text-[#f0efec] rounded-2xl rounded-tr-sm' : 'text-[#f0efec]'}`}>
                        
-                       {/* Cabecera del Asistente */}
                        {msg.role !== 'user' && (
                           <div className="flex items-center justify-between mb-4">
                              <div className="flex items-center gap-2">
@@ -330,7 +474,6 @@ export default function Home() {
                           </div>
                        )}
 
-                       {/* Modo Edición del usuario */}
                        {msg.role === 'user' && editingIndex === idx ? (
                           <div className="flex flex-col gap-2 w-[300px] md:w-[400px]">
                              <textarea
@@ -389,7 +532,6 @@ export default function Home() {
 
                     </div>
 
-                    {/* BARRA INFERIOR DE MENSAJE DE USUARIO (Hora, Lápiz de editar, Copiar pregunta) */}
                     {msg.role === 'user' && editingIndex !== idx && (
                        <div className="flex items-center gap-3 mt-1.5 mr-2 text-[11px] text-[#898781]">
                           <span>hace un momento</span>
