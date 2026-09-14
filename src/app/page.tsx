@@ -10,6 +10,12 @@ import {
   Mic, ArrowUp, ChevronDown, PenLine, LogOut, Settings
 } from "lucide-react";
 
+// --- IMPORTACIONES PARA MARKDOWN Y CÓDIGO ---
+import ReactMarkdown from 'react-markdown';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import remarkGfm from 'remark-gfm';
+
 const personas = [
   { id: "hydra", name: "Hydra", role: "Ingeniería & Desarrollo", icon: Code2, color: "text-blue-400" },
   { id: "kali", name: "Kali", role: "Diseño, 3D & Gaming", icon: Layers, color: "text-purple-400" },
@@ -210,17 +216,52 @@ export default function Home() {
                   </h2>
                </div>
             ) : (
-               // Lista de Mensajes
+               // Lista de Mensajes (CON SOPORTE MARKDOWN Y CÓDIGO)
                messages.map((msg, idx) => (
                  <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`px-5 py-3.5 max-w-[85%] text-[15px] leading-relaxed ${msg.role === 'user' ? 'bg-[#2a2a29] text-[#f0efec] rounded-2xl rounded-tr-sm' : 'text-[#f0efec]'}`}>
+                    <div className={`px-5 py-3.5 max-w-[85%] text-[15px] leading-relaxed overflow-hidden ${msg.role === 'user' ? 'bg-[#2a2a29] text-[#f0efec] rounded-2xl rounded-tr-sm' : 'text-[#f0efec]'}`}>
                        {msg.role !== 'user' && (
-                          <div className="flex items-center gap-2 mb-2">
+                          <div className="flex items-center gap-2 mb-4">
                              <activePersona.icon className={`w-4 h-4 ${activePersona.color}`} />
                              <span className="font-semibold text-sm">{activePersona.name}</span>
                           </div>
                        )}
-                       {msg.content}
+                       
+                       {/* MAGIA DE MARKDOWN */}
+                       <div className="prose prose-invert max-w-none">
+                         <ReactMarkdown
+                           remarkPlugins={[remarkGfm]}
+                           components={{
+                             code({node, inline, className, children, ...props}: any) {
+                               const match = /language-(\w+)/.exec(className || '')
+                               return !inline && match ? (
+                                 <div className="rounded-xl overflow-hidden my-4 border border-[#ffffff1a]">
+                                   <div className="flex items-center justify-between px-4 py-1.5 bg-[#1a1a19] text-[#898781] text-xs font-mono border-b border-[#ffffff1a]">
+                                     <span>{match[1]}</span>
+                                     <button className="hover:text-[#f0efec] transition-colors">Copiar</button>
+                                   </div>
+                                   <SyntaxHighlighter
+                                     {...props}
+                                     style={vscDarkPlus}
+                                     language={match[1]}
+                                     PreTag="div"
+                                     customStyle={{ margin: 0, padding: '1rem', background: '#151515', fontSize: '0.85rem' }}
+                                   >
+                                     {String(children).replace(/\n$/, '')}
+                                   </SyntaxHighlighter>
+                                 </div>
+                               ) : (
+                                 <code {...props} className="bg-[#2a2a29] text-rose-300 px-1.5 py-0.5 rounded-md text-[0.85em] font-mono">
+                                   {children}
+                                 </code>
+                               )
+                             }
+                           }}
+                         >
+                           {msg.content}
+                         </ReactMarkdown>
+                       </div>
+                       
                     </div>
                  </div>
                ))
