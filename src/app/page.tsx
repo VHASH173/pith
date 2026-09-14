@@ -40,7 +40,6 @@ export default function Home() {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
 
-  // Estado para la ventana flotante de "Todos los Chats"
   const [isAllChatsModalOpen, setIsAllChatsModalOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -55,7 +54,6 @@ export default function Home() {
     return () => unsubscribe();
   }, []);
 
-  // Sincronización en tiempo real con Firebase Firestore
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, "users", user.uid, "chats"), orderBy("createdAt", "desc"));
@@ -81,6 +79,7 @@ export default function Home() {
     return () => unsubscribe();
   }, [user, currentChatId]);
 
+  // FUNCIÓN CORREGIDA PARA LLAMAR A LA API SIN TEXTOS FANTASMA
   const sendMessageToAI = async (messagesToSend: any[], chatId: string) => {
     setIsLoading(true);
     const tempMessages = [...messagesToSend, { role: "assistant", content: "" }];
@@ -112,19 +111,14 @@ export default function Home() {
         }
       }
 
-      if (!assistantResponse.trim()) {
-        assistantResponse = "¡Hola! Estoy aquí listo para ayudarte con lo que necesites.";
-        setMessages([...messagesToSend, { role: "assistant", content: assistantResponse }]);
-      }
-
-      const finalMessages = [...messagesToSend, { role: "assistant", content: assistantResponse }];
+      const finalMessages = [...messagesToSend, { role: "assistant", content: assistantResponse || "..." }];
       await updateDoc(doc(db, "users", user.uid, "chats", chatId), {
         messages: finalMessages
       });
 
     } catch (error) {
       console.error("Error hablando con la IA:", error);
-      setMessages([...messagesToSend, { role: "assistant", content: "⚠️ Lo siento, ocurrió un error de conexión con el servidor." }]);
+      setMessages([...messagesToSend, { role: "assistant", content: "⚠️ Error de conexión con el servidor de Pitch Black." }]);
     } finally {
       setIsLoading(false);
     }
@@ -189,7 +183,6 @@ export default function Home() {
     await sendMessageToAI(previousMessages, currentChatId);
   };
 
-  // Función para Fijar / Desfijar Chat en Firestore
   const togglePinChat = async (e: React.MouseEvent, chatId: string, currentPinnedState: boolean) => {
     e.stopPropagation();
     if (!user) return;
@@ -197,12 +190,9 @@ export default function Home() {
       await updateDoc(doc(db, "users", user.uid, "chats", chatId), {
         pinned: !currentPinnedState
       });
-    } catch (error) {
-      console.error("Error al fijar chat:", error);
-    }
+    } catch (error) { console.error("Error al fijar chat:", error); }
   };
 
-  // Función para Eliminar Chat de Firestore
   const handleDeleteChat = async (e: React.MouseEvent, chatId: string) => {
     e.stopPropagation();
     if (!user) return;
@@ -213,9 +203,7 @@ export default function Home() {
           setCurrentChatId(null);
           setMessages([]);
         }
-      } catch (error) {
-        console.error("Error al eliminar chat:", error);
-      }
+      } catch (error) { console.error("Error al eliminar chat:", error); }
     }
   };
 
@@ -236,7 +224,6 @@ export default function Home() {
     try { await signOut(auth); router.push("/login"); } catch (error) { console.error(error); }
   };
 
-  // Separamos los chats fijados de los normales
   const pinnedChats = chatHistory.filter(c => c.pinned);
   const unpinnedChats = chatHistory.filter(c => !c.pinned);
 
@@ -270,7 +257,6 @@ export default function Home() {
             <div className="flex justify-between items-center px-3 mb-2">
                <span className="text-xs text-[#52514e] font-medium tracking-wide">TUS CHATS</span>
                <div className="flex items-center gap-2">
-                 {/* Botón para abrir la ventana completa de todos los chats */}
                  <button onClick={() => setIsAllChatsModalOpen(true)} title="Ver todos los chats" className="text-[#52514e] hover:text-[#f0efec] transition-colors">
                    <MessageSquare className="w-3.5 h-3.5" />
                  </button>
@@ -282,7 +268,6 @@ export default function Home() {
                <div className="flex flex-col items-center justify-center h-24 text-center mt-4"><p className="text-[13px] text-[#52514e]">Aún no hay chats.</p></div>
             ) : (
                <div className="space-y-3">
-                 {/* Sección de Chats Fijados */}
                  {pinnedChats.length > 0 && (
                    <div className="space-y-1">
                      <span className="text-[11px] text-[#52514e] px-3 font-semibold uppercase tracking-wider">Fijados</span>
@@ -305,7 +290,6 @@ export default function Home() {
                    </div>
                  )}
 
-                 {/* Sección de Chats Recientes */}
                  <div className="space-y-1">
                    {pinnedChats.length > 0 && <span className="text-[11px] text-[#52514e] px-3 font-semibold uppercase tracking-wider">Recientes</span>}
                    {unpinnedChats.map((chat) => (
@@ -351,12 +335,10 @@ export default function Home() {
          </div>
       </aside>
 
-      {/* VENTANA MODAL: TODOS LOS CHATS SINCRONIZADOS */}
+      {/* VENTANA MODAL: TODOS LOS CHATS */}
       {isAllChatsModalOpen && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#1a1a19] border border-[#ffffff1a] rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl overflow-hidden">
-             
-             {/* Cabecera del Modal */}
              <div className="flex items-center justify-between px-6 py-4 border-b border-[#ffffff0a]">
                 <div className="flex items-center gap-3">
                    <MessageSquare className="w-5 h-5 text-[#898781]" />
@@ -367,7 +349,6 @@ export default function Home() {
                 </button>
              </div>
 
-             {/* Lista de Chats en el Modal */}
              <div className="flex-1 overflow-y-auto p-6 space-y-2">
                 {chatHistory.length === 0 ? (
                    <p className="text-center text-[#52514e] py-8">No hay chats guardados en Firebase.</p>
@@ -406,13 +387,11 @@ export default function Home() {
                 )}
              </div>
 
-             {/* Pie del Modal */}
              <div className="px-6 py-3 bg-[#151515] border-t border-[#ffffff0a] flex justify-end">
                 <button onClick={() => setIsAllChatsModalOpen(false)} className="bg-[#20201f] hover:bg-[#2a2a29] text-[#f0efec] px-4 py-2 rounded-lg text-sm transition-colors border border-[#ffffff1a]">
                    Cerrar
                 </button>
              </div>
-
           </div>
         </div>
       )}
