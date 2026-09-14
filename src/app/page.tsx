@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 
 // Importamos el hook mágico de Vercel AI SDK
-import { useChat } from 'ai/react'; 
+import { useChat } from '@ai-sdk/react';
 
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';

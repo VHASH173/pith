@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.69",
+    "@ai-sdk/react": "^4.0.102",
     "ai": "^7.0.99",
     "firebase": "^12.19.0",
     "lucide-react": "^1.45.0",
