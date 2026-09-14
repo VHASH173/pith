@@ -11,8 +11,7 @@ import {
   Mic, ArrowUp, ChevronDown, PenLine, LogOut, Settings
 } from "lucide-react";
 
-// Importamos el hook mágico de Vercel AI SDK
-import { useChat } from '@ai-sdk/react';
+import { useChat } from '@ai-sdk/react'; 
 
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -39,16 +38,13 @@ export default function Home() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // --- AQUÍ ESTÁ EL CEREBRO DEL FRONTEND ---
-  // useChat maneja el estado de los mensajes, el input y la carga automáticamente
   const { messages, input, handleInputChange, handleSubmit, setMessages, isLoading } = useChat({
-    api: '/api/chat', // Aquí llama al archivo route.ts que creamos
+    api: '/api/chat', 
     body: {
-      persona: activePersona.id, // Le decimos a la API con quién estamos hablando
+      persona: activePersona.id, 
     },
     onFinish: async (message) => {
-      // Cuando la IA termina de responder, guardamos SU respuesta en Firebase
-      if (user && currentChatId) {
+      if (user && currentChatId && message?.content) {
         try {
           await updateDoc(doc(db, "users", user.uid, "chats", currentChatId), {
             messages: arrayUnion({ role: "assistant", content: message.content })
@@ -77,7 +73,6 @@ export default function Home() {
     return () => unsubscribe();
   }, [user]);
 
-  // Al cambiar de chat en la barra lateral, cargamos sus mensajes en la pantalla
   useEffect(() => {
     if (!user || !currentChatId) {
       setMessages([]);
@@ -85,8 +80,14 @@ export default function Home() {
     }
     const unsubscribe = onSnapshot(doc(db, "users", user.uid, "chats", currentChatId), (docSnap) => {
       if (docSnap.exists()) {
-        // Le pasamos los mensajes de Firebase al hook useChat para que los dibuje
-        setMessages(docSnap.data().messages || []);
+        const firestoreMessages = docSnap.data().messages || [];
+        // Mapeamos de forma segura para evitar que falle con elementos indefinidos
+        const formatted = firestoreMessages.map((m: any) => ({
+          id: Math.random().toString(),
+          role: m.role || 'user',
+          content: m.content || ''
+        }));
+        setMessages(formatted);
         const savedPersona = personas.find(p => p.id === docSnap.data().persona);
         if (savedPersona) setActivePersona(savedPersona);
       }
@@ -94,29 +95,26 @@ export default function Home() {
     return () => unsubscribe();
   }, [user, currentChatId, setMessages]);
 
-  // Esta función ahora solo maneja Firebase ANTES de enviarle el mensaje a la IA
   const handleCustomSubmit = async (e: any) => {
     e.preventDefault();
-    if (!input.trim() || !user) return;
+    if (!input || !input.trim() || !user) return;
     
     if (textareaRef.current) textareaRef.current.style.height = "auto";
 
     let activeChatId = currentChatId;
 
     if (!activeChatId) {
-      // Si es un chat nuevo, lo creamos en Firebase primero
       try {
         const docRef = await addDoc(collection(db, "users", user.uid, "chats"), {
           title: input.substring(0, 30) + (input.length > 30 ? "..." : ""),
           persona: activePersona.id,
           createdAt: serverTimestamp(),
-          messages: [{ role: "user", content: input }] // Guardamos el mensaje del usuario
+          messages: [{ role: "user", content: input }]
         });
         activeChatId = docRef.id;
         setCurrentChatId(docRef.id);
       } catch (error) { console.error("Error:", error); }
     } else {
-       // Si ya existe, solo añadimos el mensaje del usuario a Firebase
        try {
         await updateDoc(doc(db, "users", user.uid, "chats", activeChatId), {
           messages: arrayUnion({ role: "user", content: input })
@@ -124,14 +122,12 @@ export default function Home() {
       } catch (error) { console.error("Error:", error); }
     }
 
-    // Finalmente, le decimos al hook mágico que le mande el mensaje a la API (Gemini/GGUF)
     handleSubmit(e);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      // Simulamos un evento de form submit
       handleCustomSubmit(e as any);
     }
   };
@@ -143,7 +139,6 @@ export default function Home() {
   return (
     <div className="flex h-screen bg-[#151515] text-[#f0efec] font-sans selection:bg-[#898781]/30">
       
-      {/* BARRA LATERAL */}
       <aside className="w-[288px] flex-shrink-0 bg-[#151515] hidden md:flex flex-col border-r border-[#ffffff0a] relative">
          <div className="p-4 flex flex-col gap-4">
             <div className="flex items-center gap-3 px-2">
@@ -207,7 +202,6 @@ export default function Home() {
          </div>
       </aside>
 
-      {/* ÁREA PRINCIPAL */}
       <main className="flex-1 flex flex-col relative h-full bg-[#151515]">
         
         {currentChatId && (
@@ -263,7 +257,7 @@ export default function Home() {
                                      PreTag="div"
                                      customStyle={{ margin: 0, padding: '1rem', background: '#151515', fontSize: '0.85rem' }}
                                    >
-                                     {String(children).replace(/\n$/, '')}
+                                     {String(children || '').replace(/\n$/, '')}
                                    </SyntaxHighlighter>
                                  </div>
                                ) : (
@@ -274,7 +268,7 @@ export default function Home() {
                              }
                            }}
                          >
-                           {msg.content}
+                           {msg.content || ''}
                          </ReactMarkdown>
                        </div>
                        
@@ -283,7 +277,6 @@ export default function Home() {
                ))
             )}
             
-            {/* Animación sutil de carga cuando la IA está pensando */}
             {isLoading && (
               <div className="flex justify-start">
                  <div className="flex items-center gap-2 text-[#898781] px-5 py-3">
@@ -317,7 +310,7 @@ export default function Home() {
                  <button type="button" className="p-2 text-[#898781] hover:text-[#f0efec] transition-colors"><Plus className="w-[20px] h-[20px]" /></button>
                  <textarea 
                     ref={textareaRef}
-                    value={input}
+                    value={input || ''}
                     onChange={(e) => { handleInputChange(e); e.target.style.height = 'auto'; e.target.style.height = `${e.target.scrollHeight}px`; }}
                     onKeyDown={handleKeyDown}
                     className="w-full bg-transparent resize-none text-[15px] outline-none placeholder-[#898781] text-[#f0efec] py-2 max-h-48 min-h-[40px]"
@@ -327,7 +320,7 @@ export default function Home() {
                  
                  <div className="flex items-center gap-1 pb-0.5">
                     <button type="button" className="p-2 text-[#898781] hover:text-[#f0efec] transition-colors"><Mic className="w-[18px] h-[18px]" /></button>
-                    <button type="submit" disabled={!input.trim() || isLoading} className={`p-2 rounded-xl transition-colors ${input.trim() && !isLoading ? 'bg-[#f0efec] text-[#151515] hover:bg-[#e1e0d9]' : 'text-[#52514e] cursor-not-allowed'}`}>
+                    <button type="submit" disabled={!input || !input.trim() || isLoading} className={`p-2 rounded-xl transition-colors ${input && input.trim() && !isLoading ? 'bg-[#f0efec] text-[#151515] hover:bg-[#e1e0d9]' : 'text-[#52514e] cursor-not-allowed'}`}>
                        <ArrowUp className="w-[18px] h-[18px]" />
                     </button>
                  </div>
