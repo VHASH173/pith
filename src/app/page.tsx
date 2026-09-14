@@ -8,7 +8,7 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { 
   Plus, FolderClosed, Layers, Code2, SlidersHorizontal, 
-  Mic, ArrowUp, ChevronDown, PenLine, LogOut, Settings, Copy, Check, Pencil
+  Mic, ArrowUp, ChevronDown, PenLine, LogOut, Settings, Copy, Check, Pencil, RotateCw
 } from "lucide-react";
 
 import ReactMarkdown from 'react-markdown';
@@ -37,7 +37,6 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
-  // Estados para editar un mensaje
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
 
@@ -78,11 +77,8 @@ export default function Home() {
     return () => unsubscribe();
   }, [user, currentChatId]);
 
-  // Función robusta para enviar mensajes y consultar la API nativa de streaming
   const sendMessageToAI = async (messagesToSend: any[], chatId: string) => {
     setIsLoading(true);
-    
-    // Agregamos un marcador temporal de "asistente pensando"
     const tempMessages = [...messagesToSend, { role: "assistant", content: "" }];
     setMessages(tempMessages);
 
@@ -108,13 +104,16 @@ export default function Home() {
           if (done) break;
           const chunk = decoder.decode(value, { stream: true });
           assistantResponse += chunk;
-
-          // Actualizamos la UI en tiempo real (efecto streaming de tecleo)
           setMessages([...messagesToSend, { role: "assistant", content: assistantResponse }]);
         }
       }
 
-      // Guardamos la conversación completa en Firebase
+      // Si por alguna razón la IA regresó vacío, ponemos un texto de respaldo para que no se quede en blanco
+      if (!assistantResponse.trim()) {
+        assistantResponse = "¡Hola! Estoy aquí listo para ayudarte con lo que necesites.";
+        setMessages([...messagesToSend, { role: "assistant", content: assistantResponse }]);
+      }
+
       const finalMessages = [...messagesToSend, { role: "assistant", content: assistantResponse }];
       await updateDoc(doc(db, "users", user.uid, "chats", chatId), {
         messages: finalMessages
@@ -122,7 +121,7 @@ export default function Home() {
 
     } catch (error) {
       console.error("Error hablando con la IA:", error);
-      setMessages([...messagesToSend, { role: "assistant", content: "⚠️ Lo siento, ocurrió un error al procesar tu solicitud con la red." }]);
+      setMessages([...messagesToSend, { role: "assistant", content: "⚠️ Lo siento, ocurrió un error de conexión con el servidor." }]);
     } finally {
       setIsLoading(false);
     }
@@ -162,11 +161,9 @@ export default function Home() {
     await sendMessageToAI(newMessagesList, activeChatId);
   };
 
-  // Función para re-enviar un mensaje editado
   const handleEditSubmit = async (index: number) => {
     if (!editText.trim() || !user || !currentChatId) return;
     
-    // Cortamos la historia hasta el mensaje editado
     const truncatedMessages = messages.slice(0, index);
     const updatedMessages = [...truncatedMessages, { role: "user", content: editText }];
     
@@ -174,12 +171,20 @@ export default function Home() {
     setEditText("");
     setMessages(updatedMessages);
 
-    // Actualizamos Firebase y consultamos a la IA con el nuevo hilo corregido
     await updateDoc(doc(db, "users", user.uid, "chats", currentChatId), {
       messages: updatedMessages
     });
 
     await sendMessageToAI(updatedMessages, currentChatId);
+  };
+
+  // Función para regenerar la última respuesta de la IA
+  const handleRegenerate = async () => {
+    if (messages.length < 2 || isLoading || !currentChatId || !user) return;
+    // Quitamos el último mensaje del asistente y volvemos a enviar la historia previa
+    const previousMessages = messages.slice(0, messages.length - 1);
+    setMessages(previousMessages);
+    await sendMessageToAI(previousMessages, currentChatId);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -295,25 +300,37 @@ export default function Home() {
             ) : (
                messages.map((msg, idx) => (
                  <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                    
+                    {/* BARRA DE ACCESOS DIRECTOS INFERIOR (ESTILO REFERENCIA FOTO 1) */}
                     <div className={`px-5 py-3.5 max-w-[85%] text-[15px] leading-relaxed overflow-hidden relative group ${msg.role === 'user' ? 'bg-[#2a2a29] text-[#f0efec] rounded-2xl rounded-tr-sm' : 'text-[#f0efec]'}`}>
                        
+                       {/* Cabecera del Asistente */}
                        {msg.role !== 'user' && (
                           <div className="flex items-center justify-between mb-4">
                              <div className="flex items-center gap-2">
                                 <activePersona.icon className={`w-4 h-4 ${activePersona.color}`} />
                                 <span className="font-semibold text-sm">{activePersona.name}</span>
                              </div>
-                             <button 
-                                onClick={() => copyToClipboard(msg.content, idx)}
-                                className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-xs text-[#898781] hover:text-[#f0efec] bg-[#20201f] px-2 py-1 rounded-md border border-[#ffffff1a]"
-                             >
-                                {copiedIndex === idx ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                                {copiedIndex === idx ? "Copiado" : "Copiar respuesta"}
-                             </button>
+                             <div className="flex items-center gap-2">
+                                <button 
+                                   onClick={handleRegenerate}
+                                   title="Regenerar respuesta"
+                                   className="opacity-0 group-hover:opacity-100 transition-opacity text-[#898781] hover:text-[#f0efec]"
+                                >
+                                   <RotateCw className="w-3.5 h-3.5" />
+                                </button>
+                                <button 
+                                   onClick={() => copyToClipboard(msg.content, idx)}
+                                   title="Copiar respuesta"
+                                   className="opacity-0 group-hover:opacity-100 transition-opacity text-[#898781] hover:text-[#f0efec]"
+                                >
+                                   {copiedIndex === idx ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                                </button>
+                             </div>
                           </div>
                        )}
 
-                       {/* Modo Edición para el usuario */}
+                       {/* Modo Edición del usuario */}
                        {msg.role === 'user' && editingIndex === idx ? (
                           <div className="flex flex-col gap-2 w-[300px] md:w-[400px]">
                              <textarea
@@ -372,17 +389,40 @@ export default function Home() {
 
                     </div>
 
-                    {/* Botón de editar debajo del mensaje del usuario */}
+                    {/* BARRA INFERIOR DE MENSAJE DE USUARIO (Hora, Lápiz de editar, Copiar pregunta) */}
                     {msg.role === 'user' && editingIndex !== idx && (
-                       <button 
-                          onClick={() => { setEditingIndex(idx); setEditText(msg.content); }}
-                          className="text-[11px] text-[#52514e] hover:text-[#898781] mt-1 mr-2 flex items-center gap-1 transition-colors"
-                       >
-                          <Pencil className="w-3 h-3" /> Editar
-                       </button>
+                       <div className="flex items-center gap-3 mt-1.5 mr-2 text-[11px] text-[#898781]">
+                          <span>hace un momento</span>
+                          <div className="flex items-center gap-2 opacity-80 hover:opacity-100 transition-opacity">
+                             <button 
+                                onClick={() => { setEditingIndex(idx); setEditText(msg.content); }}
+                                title="Editar mensaje"
+                                className="hover:text-[#f0efec] transition-colors"
+                             >
+                                <Pencil className="w-3 h-3" />
+                             </button>
+                             <button 
+                                onClick={() => copyToClipboard(msg.content, idx)}
+                                title="Copiar pregunta"
+                                className="hover:text-[#f0efec] transition-colors"
+                             >
+                                {copiedIndex === idx ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                             </button>
+                          </div>
+                       </div>
                     )}
+
                  </div>
                ))
+            )}
+            
+            {isLoading && (
+              <div className="flex justify-start">
+                 <div className="flex items-center gap-2 text-[#898781] px-5 py-3">
+                   <activePersona.icon className={`w-4 h-4 ${activePersona.color} animate-pulse`} />
+                   <span className="text-sm italic">Pensando...</span>
+                </div>
+              </div>
             )}
             
             <div ref={messagesEndRef} />
