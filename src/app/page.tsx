@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { auth, db } from "../firebase"; 
-import { collection, addDoc, serverTimestamp, query, orderBy, onSnapshot } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, query, orderBy, onSnapshot, doc, updateDoc, arrayUnion } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { 
@@ -23,49 +23,76 @@ export default function Home() {
   const [user, setUser] = useState<any>(null);
   const [inputValue, setInputValue] = useState("");
   const [chatHistory, setChatHistory] = useState<any[]>([]);
+  const [messages, setMessages] = useState<any[]>([]);
   const [activePersona, setActivePersona] = useState(personas[0]);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  
-  // Nuevo estado para saber en qué chat estamos
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
 
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-scroll al último mensaje
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
     return () => unsubscribe();
   }, []);
 
+  // Cargar lista de chats
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, "users", user.uid, "chats"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const chats = snapshot.docs.map(doc => ({
-        id: doc.id,
-        title: doc.data().title || "Nuevo Chat",
-        ...doc.data()
-      }));
+      const chats = snapshot.docs.map(doc => ({ id: doc.id, title: doc.data().title || "Nuevo Chat", ...doc.data() }));
       setChatHistory(chats);
     });
     return () => unsubscribe();
   }, [user]);
 
+  // Cargar mensajes del chat actual
+  useEffect(() => {
+    if (!user || !currentChatId) {
+      setMessages([]);
+      return;
+    }
+    const unsubscribe = onSnapshot(doc(db, "users", user.uid, "chats", currentChatId), (docSnap) => {
+      if (docSnap.exists()) {
+        setMessages(docSnap.data().messages || []);
+        const savedPersona = personas.find(p => p.id === docSnap.data().persona);
+        if (savedPersona) setActivePersona(savedPersona);
+      }
+    });
+    return () => unsubscribe();
+  }, [user, currentChatId]);
+
   const handleSendMessage = async () => {
     if (!inputValue.trim() || !user) return;
     const messageText = inputValue;
     setInputValue("");
-    try {
-      // Guardamos el chat y capturamos el ID para seleccionarlo automáticamente
-      const docRef = await addDoc(collection(db, "users", user.uid, "chats"), {
-        title: messageText.substring(0, 30) + (messageText.length > 30 ? "..." : ""),
-        persona: activePersona.id,
-        createdAt: serverTimestamp(),
-        messages: [{ role: "user", content: messageText }]
-      });
-      setCurrentChatId(docRef.id);
-    } catch (error) {
-      console.error("Error al guardar el chat:", error);
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+
+    if (currentChatId) {
+      // Agregar mensaje a un chat existente
+      try {
+        await updateDoc(doc(db, "users", user.uid, "chats", currentChatId), {
+          messages: arrayUnion({ role: "user", content: messageText })
+        });
+      } catch (error) { console.error("Error:", error); }
+    } else {
+      // Crear chat nuevo
+      try {
+        const docRef = await addDoc(collection(db, "users", user.uid, "chats"), {
+          title: messageText.substring(0, 30) + (messageText.length > 30 ? "..." : ""),
+          persona: activePersona.id,
+          createdAt: serverTimestamp(),
+          messages: [{ role: "user", content: messageText }]
+        });
+        setCurrentChatId(docRef.id);
+      } catch (error) { console.error("Error:", error); }
     }
   };
 
@@ -76,24 +103,20 @@ export default function Home() {
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      router.push("/login");
-    } catch (error) {
-      console.error("Error al cerrar sesión:", error);
-    }
+  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInputValue(e.target.value);
+    e.target.style.height = 'auto';
+    e.target.style.height = `${e.target.scrollHeight}px`;
   };
 
-  // Función para el botón "Nuevo Chat"
-  const handleNewChat = () => {
-    setCurrentChatId(null);
-    setInputValue("");
+  const handleLogout = async () => {
+    try { await signOut(auth); router.push("/login"); } catch (error) { console.error(error); }
   };
 
   return (
     <div className="flex h-screen bg-[#151515] text-[#f0efec] font-sans selection:bg-[#898781]/30">
       
+      {/* BARRA LATERAL */}
       <aside className="w-[288px] flex-shrink-0 bg-[#151515] hidden md:flex flex-col border-r border-[#ffffff0a] relative">
          <div className="p-4 flex flex-col gap-4">
             <div className="flex items-center gap-3 px-2">
@@ -102,17 +125,11 @@ export default function Home() {
                 </svg>
                 <span className="font-serif font-bold text-xl tracking-tight">Pitch Black</span>
             </div>
-            
-            {/* Botón Nuevo Chat Sincronizado */}
-            <button 
-              onClick={handleNewChat}
-              className="flex items-center gap-2 bg-[#20201f] hover:bg-[#2a2a29] text-[#f0efec] px-4 py-2.5 rounded-lg border border-[#ffffff1a] transition-colors text-sm font-medium shadow-md"
-            >
+            <button onClick={() => { setCurrentChatId(null); setInputValue(""); }} className="flex items-center gap-2 bg-[#20201f] hover:bg-[#2a2a29] text-[#f0efec] px-4 py-2.5 rounded-lg border border-[#ffffff1a] transition-colors text-sm font-medium shadow-md">
                <Plus className="w-4 h-4" /> Nuevo Chat
             </button>
          </div>
 
-         {/* Menú Superior Ultra Limpio */}
          <nav className="flex flex-col px-4 space-y-1 mb-6">
             <button className="flex items-center gap-3 w-full text-left px-3 py-2 text-[#898781] hover:bg-[#20201f] hover:text-[#f0efec] text-[14px] rounded-lg transition-colors">
               <FolderClosed className="w-[18px] h-[18px]" /> Proyectos
@@ -127,20 +144,12 @@ export default function Home() {
                <span className="text-xs text-[#52514e] font-medium tracking-wide">TUS CHATS</span>
                <SlidersHorizontal className="w-3 h-3 text-[#52514e] cursor-pointer hover:text-[#f0efec] transition-colors" />
             </div>
-            
             {chatHistory.length === 0 ? (
-               <div className="flex flex-col items-center justify-center h-24 px-4 text-center mt-4">
-                 <p className="text-[13px] text-[#52514e]">Aún no hay chats.</p>
-               </div>
+               <div className="flex flex-col items-center justify-center h-24 text-center mt-4"><p className="text-[13px] text-[#52514e]">Aún no hay chats.</p></div>
             ) : (
                <div className="space-y-1">
                  {chatHistory.map((chat) => (
-                   <button 
-                     key={chat.id} 
-                     onClick={() => setCurrentChatId(chat.id)}
-                     className={`w-full text-left text-[13px] px-3 py-2 rounded-lg cursor-pointer truncate transition-colors flex items-center gap-2 
-                       ${currentChatId === chat.id ? 'bg-[#2a2a29] text-[#f0efec]' : 'text-[#898781] hover:bg-[#20201f] hover:text-[#f0efec]'}`}
-                   >
+                   <button key={chat.id} onClick={() => setCurrentChatId(chat.id)} className={`w-full text-left text-[13px] px-3 py-2 rounded-lg cursor-pointer truncate transition-colors flex items-center gap-2 ${currentChatId === chat.id ? 'bg-[#2a2a29] text-[#f0efec]' : 'text-[#898781] hover:bg-[#20201f] hover:text-[#f0efec]'}`}>
                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${personas.find(p => p.id === chat.persona)?.color.replace('text-', 'bg-') || 'bg-[#898781]'}`}></span>
                      {chat.title}
                    </button>
@@ -149,117 +158,128 @@ export default function Home() {
             )}
          </div>
 
-         {/* Menú de Usuario Minimalista */}
          <div className="absolute bottom-0 left-0 w-full p-2 bg-[#151515] border-t border-[#ffffff0a]">
             {isUserMenuOpen && (
                <div className="absolute bottom-[3.5rem] left-2 w-[256px] bg-[#20201f] border border-[#ffffff1a] rounded-xl shadow-2xl p-1 z-50">
-                  <div className="px-3 py-2 mb-1 border-b border-[#ffffff0a]">
-                    <p className="text-[13px] text-[#898781] truncate">{user?.email || "usuario@correo.com"}</p>
-                  </div>
+                  <div className="px-3 py-2 mb-1 border-b border-[#ffffff0a]"><p className="text-[13px] text-[#898781] truncate">{user?.email}</p></div>
                   <button className="flex items-center justify-between w-full text-left px-3 py-2 text-[#f0efec] hover:bg-[#2a2a29] text-[13px] rounded-lg transition-colors">
-                     <div className="flex items-center gap-3">
-                        <Settings className="w-4 h-4" /> Ajustes
-                     </div>
+                     <div className="flex items-center gap-3"><Settings className="w-4 h-4" /> Ajustes</div>
                   </button>
-                  <button onClick={handleLogout} className="flex items-center gap-3 w-full text-left px-3 py-2 text-[#f0efec] hover:bg-[#2a2a29] text-[13px] rounded-lg transition-colors mt-1">
+                  <button onClick={handleLogout} className="flex items-center gap-3 w-full text-left px-3 py-2 text-rose-400 hover:bg-[#2a2a29] text-[13px] rounded-lg transition-colors mt-1">
                      <LogOut className="w-4 h-4" /> Cerrar sesión
                   </button>
                </div>
             )}
-            
-            <button 
-               onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-               className="flex items-center justify-between w-full px-2 py-2 rounded-lg hover:bg-[#20201f] transition-colors"
-            >
+            <button onClick={() => setIsUserMenuOpen(!isUserMenuOpen)} className="flex items-center justify-between w-full px-2 py-2 rounded-lg hover:bg-[#20201f] transition-colors">
                <div className="flex items-center gap-2">
-                 <div className="w-6 h-6 rounded bg-[#333332] flex items-center justify-center text-[#f0efec] text-xs font-medium uppercase">
-                    {user?.displayName?.charAt(0) || "U"}
-                 </div>
-                 <p className="text-[13px] text-[#f0efec] font-medium">
-                   {user?.displayName ? user.displayName.split(' ')[0].toLowerCase() : "user"} 
-                   <span className="text-[#898781] font-normal ml-1">· Free</span>
-                 </p>
+                 <div className="w-6 h-6 rounded bg-[#333332] flex items-center justify-center text-[#f0efec] text-xs font-medium uppercase">{user?.displayName?.charAt(0) || "U"}</div>
+                 <p className="text-[13px] text-[#f0efec] font-medium">{user?.displayName?.split(' ')[0].toLowerCase() || "user"} <span className="text-[#898781] font-normal ml-1">· Free</span></p>
                </div>
                <ChevronDown className="w-3 h-3 text-[#898781]" />
             </button>
          </div>
       </aside>
 
-      {/* Área Principal */}
+      {/* ÁREA PRINCIPAL - ESTILO CLAUDE */}
       <main className="flex-1 flex flex-col relative h-full bg-[#151515]">
-        <div className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col items-center justify-center">
-          <div className="w-full max-w-[44rem] flex flex-col gap-6 items-center">
-             
-             <div className="text-center font-serif text-[clamp(2rem,1.5rem+3vw,3rem)] mb-8 font-light flex items-center justify-center gap-4 transition-all">
-               <activePersona.icon className={`w-[0.8em] h-[0.8em] ${activePersona.color} drop-shadow-lg opacity-80`} />
-               Habla con {activePersona.name}
+        
+        {/* Cabecera superior si hay un chat activo */}
+        {currentChatId && (
+          <header className="flex items-center justify-between px-6 py-3 border-b border-[#ffffff0a]">
+             <div className="flex items-center gap-2 cursor-pointer hover:bg-[#20201f] px-2 py-1 rounded-md transition-colors">
+                <span className="text-[#f0efec] text-[15px] font-medium">{chatHistory.find(c => c.id === currentChatId)?.title || "Chat"}</span>
+                <ChevronDown className="w-4 h-4 text-[#898781]" />
              </div>
-
-             <div className="w-full bg-[#20201f] border border-[#ffffff0a] rounded-2xl shadow-2xl transition-colors relative flex flex-col ring-1 ring-white/5 focus-within:ring-white/10">
-                
-                <div className="flex items-center justify-between px-3 pt-3 relative">
-                   <button 
-                     onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                     className="text-[#f0efec] bg-[#2a2a29] px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 shadow-sm border border-white/5 hover:bg-[#333332] transition-colors"
-                   >
-                     <activePersona.icon className={`w-4 h-4 ${activePersona.color}`} /> 
-                     {activePersona.name}
-                     <ChevronDown className="w-3 h-3 text-[#898781] ml-1" />
-                   </button>
-
-                   {isDropdownOpen && (
-                     <div className="absolute top-12 left-3 w-64 bg-[#1a1a19] border border-[#ffffff1a] rounded-xl shadow-2xl z-50 overflow-hidden ring-1 ring-black/50">
-                        <div className="px-3 py-2 border-b border-[#ffffff0a]">
-                           <p className="text-xs text-[#898781] font-semibold tracking-wide">SELECCIONA UN ESPECIALISTA</p>
-                        </div>
-                        <div className="flex flex-col p-1">
-                           {personas.map((p) => (
-                              <button 
-                                key={p.id}
-                                onClick={() => { setActivePersona(p); setIsDropdownOpen(false); }}
-                                className={`flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition-colors ${activePersona.id === p.id ? 'bg-[#2a2a29]' : 'hover:bg-[#20201f]'}`}
-                              >
-                                 <div className="flex items-center gap-3">
-                                    <p.icon className={`w-[18px] h-[18px] ${p.color}`} />
-                                    <div>
-                                       <p className="text-[#f0efec] text-sm font-medium">{p.name}</p>
-                                       <p className="text-[#898781] text-xs">{p.role}</p>
-                                    </div>
-                                 </div>
-                              </button>
-                           ))}
-                        </div>
-                     </div>
-                   )}
-                </div>
-
-                <textarea 
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  className="w-full bg-transparent resize-none text-[15px] outline-none placeholder-[#52514e] text-[#f0efec] px-4 py-4 max-h-96 min-h-[72px]"
-                  placeholder={`Pídele a ${activePersona.name} que cree algo increíble...`}
-                  rows={2}
-                ></textarea>
-                
-                <div className="flex justify-between items-center px-3 pb-3">
-                   <div className="flex gap-2">
-                      <button className="text-[#52514e] hover:text-[#f0efec] transition-colors p-1"><Plus className="w-[18px] h-[18px]" /></button>
-                   </div>
-                   <div className="flex items-center gap-3">
-                      <span className="text-[#52514e] text-[13px] font-medium hidden sm:block">Modo: {activePersona.role}</span>
-                      <button 
-                        onClick={handleSendMessage}
-                        className={`p-2 rounded-lg transition-colors ml-2 shadow-md ${inputValue.trim() ? 'bg-[#f0efec] text-[#151515] hover:bg-[#e1e0d9]' : 'bg-[#2a2a29] text-[#52514e] cursor-not-allowed'}`}
-                      >
-                         <ArrowUp className="w-[18px] h-[18px]" />
-                      </button>
-                   </div>
-                </div>
+             <div className="flex items-center gap-4">
+                <span className="text-[#898781] text-sm">Plan gratuito · <span className="text-blue-400 hover:underline cursor-pointer">Actualizar</span></span>
+                <button className="bg-[#20201f] hover:bg-[#2a2a29] text-[#f0efec] px-4 py-1.5 rounded-lg text-sm transition-colors border border-[#ffffff1a]">Compartir</button>
              </div>
-             
+          </header>
+        )}
+
+        {/* Zona de Mensajes */}
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col items-center">
+          <div className="w-full max-w-[48rem] flex flex-col gap-6 pb-10">
+            
+            {!currentChatId || messages.length === 0 ? (
+               // Estado Vacío (Nuevo Chat)
+               <div className="flex flex-col items-center justify-center h-[50vh] transition-all">
+                  <activePersona.icon className={`w-12 h-12 ${activePersona.color} mb-6 opacity-80`} />
+                  <h2 className="text-center font-serif text-[clamp(1.5rem,1.5rem+1.5vw,2.5rem)] font-light text-[#f0efec]">
+                     ¡Hola! ¿En qué puede ayudarte {activePersona.name} hoy?
+                  </h2>
+               </div>
+            ) : (
+               // Lista de Mensajes
+               messages.map((msg, idx) => (
+                 <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`px-5 py-3.5 max-w-[85%] text-[15px] leading-relaxed ${msg.role === 'user' ? 'bg-[#2a2a29] text-[#f0efec] rounded-2xl rounded-tr-sm' : 'text-[#f0efec]'}`}>
+                       {msg.role !== 'user' && (
+                          <div className="flex items-center gap-2 mb-2">
+                             <activePersona.icon className={`w-4 h-4 ${activePersona.color}`} />
+                             <span className="font-semibold text-sm">{activePersona.name}</span>
+                          </div>
+                       )}
+                       {msg.content}
+                    </div>
+                 </div>
+               ))
+            )}
+            <div ref={messagesEndRef} />
           </div>
         </div>
+
+        {/* Caja de Texto Anclada al Fondo */}
+        <div className="w-full max-w-[52rem] mx-auto px-4 pb-6 relative shrink-0">
+           
+           {/* Selector Flotante de Modelos */}
+           {isDropdownOpen && !currentChatId && (
+              <div className="absolute bottom-[4.5rem] right-6 w-56 bg-[#1a1a19] border border-[#ffffff1a] rounded-xl shadow-2xl z-50 overflow-hidden ring-1 ring-black/50">
+                 <div className="flex flex-col p-1">
+                    {personas.map((p) => (
+                       <button key={p.id} onClick={() => { setActivePersona(p); setIsDropdownOpen(false); }} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${activePersona.id === p.id ? 'bg-[#2a2a29]' : 'hover:bg-[#20201f]'}`}>
+                          <p.icon className={`w-4 h-4 ${p.color}`} />
+                          <span className="text-[#f0efec] text-sm">{p.name}</span>
+                       </button>
+                    ))}
+                 </div>
+              </div>
+           )}
+
+           <div className="w-full bg-[#20201f] border border-[#ffffff0a] rounded-2xl shadow-lg flex flex-col relative focus-within:ring-1 focus-within:ring-[#ffffff1a] transition-all">
+              <div className="flex items-end px-3 py-3 gap-2">
+                 <button className="p-2 text-[#898781] hover:text-[#f0efec] transition-colors"><Plus className="w-[20px] h-[20px]" /></button>
+                 <textarea 
+                    ref={textareaRef}
+                    value={inputValue}
+                    onChange={handleInput}
+                    onKeyDown={handleKeyDown}
+                    className="w-full bg-transparent resize-none text-[15px] outline-none placeholder-[#898781] text-[#f0efec] py-2 max-h-48 min-h-[40px]"
+                    placeholder={`Escribe un mensaje para ${activePersona.name}...`}
+                    rows={1}
+                 ></textarea>
+                 
+                 <div className="flex items-center gap-1 pb-0.5">
+                    <button className="p-2 text-[#898781] hover:text-[#f0efec] transition-colors"><Mic className="w-[18px] h-[18px]" /></button>
+                    <button onClick={handleSendMessage} className={`p-2 rounded-xl transition-colors ${inputValue.trim() ? 'bg-[#f0efec] text-[#151515] hover:bg-[#e1e0d9]' : 'text-[#52514e] cursor-not-allowed'}`}>
+                       <ArrowUp className="w-[18px] h-[18px]" />
+                    </button>
+                 </div>
+              </div>
+           </div>
+           
+           {/* Pie de página pequeño */}
+           <div className="flex justify-between items-center mt-3 px-2 text-[11px] text-[#52514e]">
+              <p>Pitch Black es una IA y puede cometer errores. Comprueba las respuestas.</p>
+              {!currentChatId && (
+                <button onClick={() => setIsDropdownOpen(!isDropdownOpen)} className="flex items-center gap-1.5 hover:text-[#898781] transition-colors">
+                   <span className="font-medium text-[#898781]">{activePersona.name}</span>
+                   <span>Medio</span>
+                </button>
+              )}
+           </div>
+        </div>
+
       </main>
     </div>
   );
